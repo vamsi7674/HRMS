@@ -1,0 +1,10 @@
+<div class="min-h-screen bg-[#f0f4fa]">
+    <app-sidebar [isOpen]="sidebarOpen()" (closeSidebar)="closeSidebar()"/>
+    <app-header (toggleSidebar)="toggleSidebar()"/>
+    <main class="lg:ml-[280px] pt-16 min-h-screen transition-all duration-200">
+        <div class="p-5 lg:p-7">
+            <router-outlet/>
+        </div>
+    </main>
+    <app-ai-chatbot/>
+</div>

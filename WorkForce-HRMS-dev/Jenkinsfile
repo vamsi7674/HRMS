@@ -1,0 +1,150 @@
+pipeline {
+    agent any
+
+    tools {
+        jdk 'JDK17'
+        maven 'Maven-3.8' // Using the Maven tool configured in your Jenkins
+        nodejs 'NodeJS22' // Assuming NodeJS22 is configured in Jenkins
+    }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '5'))
+        timestamps()
+    }
+
+    environment {
+        // ── Backend ─────────────────────────────────────────────
+        JAR_NAME       = 'Workforce-0.0.1-SNAPSHOT.jar'
+        BACKEND_DIR    = '.' // Assumes Jenkins checks out this WorkForce-HRMS-dev repo directly. If it checks out the parent HRMS folder, change to 'WorkForce-HRMS-dev'
+        // ── EC2 (Jenkins runs ON this server — local paths) ─────
+        DEPLOY_DIR     = '/var/lib/jenkins/workforce-hrms'
+        
+        // ── Frontend ────────────────────────────────────────────
+        FRONTEND_DIR   = '../HRMS-Portal-main' // Adjust if your frontend is located inside a different directory relative to the backend
+        S3_BUCKET      = 'hrms-portal-bucket' // REPLACE WITH YOUR S3 BUCKET NAME
+        AWS_REGION     = 'ap-south-1'      // REPLACE WITH YOUR AWS REGION
+        AWS_CREDS_ID   = 'aws-s3-credentials' // Match your Jenkins AWS credentials ID
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                echo '── Checking out code ──'
+                checkout scm
+                // Note: If HRMS-Portal-main is in a separate Git repository, 
+                // you will need to git clone it here into $FRONTEND_DIR
+            }
+        }
+
+        // ══════════════════════════════════════
+        //  BACKEND STAGES
+        // ══════════════════════════════════════
+
+        stage('Backend: Build JAR') {
+            steps {
+                echo '── Building Spring Boot JAR ──'
+                dir("${BACKEND_DIR}") {
+                    sh 'mvn -B clean package -DskipTests -q'
+                    archiveArtifacts artifacts: "target/${JAR_NAME}", fingerprint: true
+                }
+            }
+        }
+
+        stage('Backend: Copy Files Locally') {
+            steps {
+                echo '── Copying files to EC2 deploy directory ──'
+                sh """
+                    mkdir -p \${DEPLOY_DIR}
+                    cp "\${BACKEND_DIR}/target/\${JAR_NAME}" \${DEPLOY_DIR}/
+                    cp "\${BACKEND_DIR}/docker-compose.yml" \${DEPLOY_DIR}/
+                    cp "\${BACKEND_DIR}/deploy.sh" \${DEPLOY_DIR}/
+                    cp "\${BACKEND_DIR}/Dockerfile.local" \${DEPLOY_DIR}/
+                    chmod +x \${DEPLOY_DIR}/deploy.sh
+                    echo '✅ Files copied to \${DEPLOY_DIR}'
+                    ls -la \${DEPLOY_DIR}/
+                """
+            }
+        }
+
+        stage('Backend: Deploy Docker Compose') {
+            steps {
+                echo '── Starting MySQL + Spring Boot via Docker Compose ──'
+                withCredentials([
+                    string(credentialsId: 'mysql-root-password',  variable: 'MYSQL_ROOT_PASS'),
+                    string(credentialsId: 'mysql-user-password',  variable: 'MYSQL_USER_PASS'),
+                    string(credentialsId: 'spring-mail-password', variable: 'MAIL_PASS'),
+                    string(credentialsId: 'jwt-secret-key',       variable: 'JWT_SEC')
+                ]) {
+                    sh """
+                        cd \${DEPLOY_DIR}
+                        export MYSQL_ROOT_PASSWORD="\$MYSQL_ROOT_PASS"
+                        export MYSQL_PASSWORD="\$MYSQL_USER_PASS"
+                        export MAIL_PASSWORD="\$MAIL_PASS"
+                        export JWT_SECRET="\$JWT_SEC"
+                        bash ./deploy.sh
+                    """
+                }
+                echo '✅ Backend deployed locally on EC2!'
+            }
+        }
+
+        // ══════════════════════════════════════
+        //  FRONTEND STAGES
+        // ══════════════════════════════════════
+
+        stage('Frontend: Install & Build') {
+            steps {
+                echo '── Building Angular app ──'
+                dir("${FRONTEND_DIR}") {
+                    sh '''
+                        node --version
+                        npm --version
+                        npm ci --prefer-offline
+                        npx ng build --configuration production
+                    '''
+                }
+            }
+        }
+
+        stage('Frontend: Deploy to S3') {
+            steps {
+                echo '── Syncing Angular build to S3 ──'
+                withCredentials([usernamePassword(
+                    credentialsId: "\${AWS_CREDS_ID}",
+                    usernameVariable: 'AWS_ACCESS_KEY_ID',
+                    passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                )]) {
+                    dir("${FRONTEND_DIR}") {
+                        sh """
+                            # Sync all files except index.html (with long-term cache)
+                            aws s3 sync dist/HRMS-Portal/browser/ s3://\${S3_BUCKET}/ \\
+                                --region \${AWS_REGION} \\
+                                --delete \\
+                                --cache-control 'public, max-age=31536000' \\
+                                --exclude 'index.html'
+
+                            # Upload index.html with no-cache (so routing always works)
+                            aws s3 cp dist/HRMS-Portal/browser/index.html \\
+                                s3://\${S3_BUCKET}/index.html \\
+                                --region \${AWS_REGION} \\
+                                --cache-control 'no-cache, no-store, must-revalidate' \\
+                                --content-type 'text/html'
+
+                            echo "✅ Frontend live at: http://\${S3_BUCKET}.s3-website-\${AWS_REGION}.amazonaws.com"
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo '🎉 Full HRMS Deployment SUCCESS'
+        }
+        failure {
+            echo '❌ Deployment FAILED — check stage logs above'
+        }
+    }
+}
