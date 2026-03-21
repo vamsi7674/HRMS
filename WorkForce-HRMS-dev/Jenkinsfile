@@ -112,9 +112,9 @@ pipeline {
                         export NG_CLI_ANALYTICS=false
                         export NODE_OPTIONS="--max_old_space_size=1536"
                         
-                        # Fix for 405 Method Not Allowed: Point the Angular Production build to the EC2 Backend IP on port 8081 Instead!
-                        sed -i "s|apiUrl: '/api'|apiUrl: 'http://3.111.168.187:8081/api'|g" src/environments/environment.prod.ts
-                        sed -i "s|wsUrl: '/ws'|wsUrl: 'ws://3.111.168.187:8081/ws'|g" src/environments/environment.prod.ts
+                        # Point the Angular Production build to your new permanent Elastic IP
+                        sed -i "s|apiUrl: '/api'|apiUrl: 'http://13.127.242.228:8081/api'|g" src/environments/environment.prod.ts
+                        sed -i "s|wsUrl: '/ws'|wsUrl: 'ws://13.127.242.228:8081/ws'|g" src/environments/environment.prod.ts
                         
                         npx ng build --configuration production
                     '''
