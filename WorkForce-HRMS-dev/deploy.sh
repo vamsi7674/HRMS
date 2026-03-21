@@ -5,7 +5,7 @@ echo "Stopping existing containers..."
 docker-compose down || true
 
 echo "Building backend Docker image manually (bypassing buildx requirement)..."
-docker build -t workforce-backend-local:latest .
+docker build -f Dockerfile.local -t workforce-backend-local:latest .
 
 echo "Starting containers (skipping rebuild since image is already built)..."
 docker-compose up -d --no-build
