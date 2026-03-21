@@ -15,7 +15,7 @@ services:
       - DB_USERNAME=workforce_user
       - DB_PASSWORD=${MYSQL_PASSWORD}
       - JWT_SECRET=${JWT_SECRET}
-      - MAIL_USERNAME=workforcerhms@gmail.com
+      - MAIL_USERNAME=vamcdiva@gmail.com
       - MAIL_PASSWORD=${MAIL_PASSWORD}
       - APP_CORS_ALLOWED_ORIGINS=http://workforce-hrms-frontend-vamsi.s3-website.ap-south-1.amazonaws.com
       - SPRING_DATASOURCE_URL=jdbc:mysql://workforce-mysql:3306/workforce_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
