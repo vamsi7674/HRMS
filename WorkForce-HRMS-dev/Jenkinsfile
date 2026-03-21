@@ -15,25 +15,30 @@ pipeline {
     environment {
         // ── Backend ─────────────────────────────────────────────
         JAR_NAME       = 'Workforce-0.0.1-SNAPSHOT.jar'
-        BACKEND_DIR    = '.' // Assumes Jenkins checks out this WorkForce-HRMS-dev repo directly. If it checks out the parent HRMS folder, change to 'WorkForce-HRMS-dev'
+        BACKEND_DIR    = 'WorkForce-HRMS-dev' // 👈 Fixed this!
         // ── EC2 (Jenkins runs ON this server — local paths) ─────
         DEPLOY_DIR     = '/var/lib/jenkins/workforce-hrms'
         
         // ── Frontend ────────────────────────────────────────────
-        FRONTEND_DIR   = '../HRMS-Portal-main' // Adjust if your frontend is located inside a different directory relative to the backend
-        S3_BUCKET      = 'hrms-portal-bucket' // REPLACE WITH YOUR S3 BUCKET NAME
-        AWS_REGION     = 'ap-south-1'      // REPLACE WITH YOUR AWS REGION
-        AWS_CREDS_ID   = 'aws-s3-credentials' // Match your Jenkins AWS credentials ID
+        FRONTEND_REPO  = 'https://github.com/RakeshReddy21/HRMS-Portal.git' // Keep your repo tracking intact 
+        FRONTEND_DIR   = 'HRMS-Portal-main'
+        S3_BUCKET      = 'workforce-hrms-frontend-vamsi' // I placed the bucket name you already created!
+        AWS_REGION     = 'ap-south-1'      
+        AWS_CREDS_ID   = 'aws-s3-credentials' 
     }
 
     stages {
 
         stage('Checkout') {
             steps {
-                echo '── Checking out code ──'
+                echo '── Checking out Backend ──'
                 checkout scm
-                // Note: If HRMS-Portal-main is in a separate Git repository, 
-                // you will need to git clone it here into $FRONTEND_DIR
+                
+                echo '── Cloning Frontend Repository ──'
+                sh '''
+                    rm -rf ${FRONTEND_DIR}
+                    git clone ${FRONTEND_REPO} ${FRONTEND_DIR}
+                '''
             }
         }
 
@@ -100,7 +105,17 @@ pipeline {
                     sh '''
                         node --version
                         npm --version
-                        npm ci --prefer-offline
+                        npm install
+                        
+                        # Fix for hanging: Disable prompts and increase memory!
+                        export CI=true
+                        export NG_CLI_ANALYTICS=false
+                        export NODE_OPTIONS="--max_old_space_size=1536"
+                        
+                        # Fix for 405 Method Not Allowed: Point the Angular Production build to the EC2 Backend IP on port 8081 Instead!
+                        sed -i "s|apiUrl: '/api'|apiUrl: 'http://3.111.168.187:8081/api'|g" src/environments/environment.prod.ts
+                        sed -i "s|wsUrl: '/ws'|wsUrl: 'ws://3.111.168.187:8081/ws'|g" src/environments/environment.prod.ts
+                        
                         npx ng build --configuration production
                     '''
                 }
@@ -111,7 +126,7 @@ pipeline {
             steps {
                 echo '── Syncing Angular build to S3 ──'
                 withCredentials([usernamePassword(
-                    credentialsId: "\${AWS_CREDS_ID}",
+                    credentialsId: 'aws-s3-credentials',
                     usernameVariable: 'AWS_ACCESS_KEY_ID',
                     passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                 )]) {
